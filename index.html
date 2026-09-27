@@ -1,0 +1,531 @@
+
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>хөөрхөн Тэргэл-дээ</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#020205}
+body{font-family:Arial,Helvetica,sans-serif}
+#scene{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 52%,#10040e 0%,#050308 40%,#010103 100%)}
+canvas{display:block;width:100%;height:100%}
+#title{position:absolute;top:10%;left:0;width:100%;text-align:center;color:#f64eaf;font-size:clamp(16px,4vw,26px);font-weight:700;text-shadow:0 0 7px #ff168d,0 0 18px #ff168d;opacity:0;transition:opacity 1s;pointer-events:none}
+#subtitle{position:absolute;bottom:13%;left:0;width:100%;text-align:center;color:#f7b7db;font-size:clamp(13px,3vw,18px);letter-spacing:1px;text-shadow:0 0 9px #ff168d;opacity:0;pointer-events:none}
+#start{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:radial-gradient(ellipse at center,#10050e 0%,#030205 66%);color:#ff55b5;cursor:pointer;transition:opacity .8s;z-index:2}
+#start .heart{font-size:22px;filter:drop-shadow(0 0 8px #ff168d);animation:pulse 1.2s ease-in-out infinite}
+#start .rings{position:absolute;width:42px;height:42px;border:1px solid #ff55b566;border-radius:50%;animation:ripple 2s ease-out infinite}
+#start small{font-size:11px;letter-spacing:1.4px;color:#ad819d}
+@keyframes pulse{50%{transform:scale(1.3)}}
+@keyframes ripple{0%{transform:scale(.7);opacity:.8}100%{transform:scale(3.5);opacity:0}}
+</style>
+</head>
+<body>
+<div id="scene">
+ <div id="title">Тэнэг намайгаа уучлаарай <span style="color:#ff4cae">♥</span></div>
+ <div id="subtitle"></div>
+ <div id="start"><div class="rings"></div><div class="heart">♥</div><small>ЭХЛҮҮЛЭХИЙН ТУЛД ДАРНА УУ</small></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(()=>{
+const root=document.getElementById('scene');
+const startScreen=document.getElementById('start');
+const title=document.getElementById('title');
+const subtitle=document.getElementById('subtitle');
+const bgMusic = new Audio('music.mp3');
+bgMusic.volume = 1;
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,.1,100);
+camera.position.set(0,0,10);
+
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+root.prepend(renderer.domElement);
+
+const world=new THREE.Group();
+scene.add(world);
+
+const pink=0xff55b5;
+const bright=0xffb5e4;
+
+// ---------- STAR FIELD ----------
+const starPositions=[];
+for(let i=0;i<950;i++){
+ starPositions.push(
+  (Math.random()-.5)*22,
+  (Math.random()-.5)*15,
+  -3-Math.random()*9
+ );
+}
+const sg=new THREE.BufferGeometry();
+sg.setAttribute('position',new THREE.Float32BufferAttribute(starPositions,3));
+const starMat=new THREE.PointsMaterial({
+ color:0x9e7193,size:.012,transparent:true,opacity:.55
+});
+scene.add(new THREE.Points(sg,starMat));
+
+// ---------- STAR PARTICLE MATERIAL ----------
+function makeStarMaterial(color,size,opacity=1){
+ return new THREE.PointsMaterial({
+  color,
+  size,
+  transparent:true,
+  opacity,
+  blending:THREE.AdditiveBlending,
+  depthWrite:false,
+  sizeAttenuation:true
+ });
+}
+
+// ---------- HEART SHAPE ----------
+function heartPoint(t){
+ return new THREE.Vector3(
+  16*Math.pow(Math.sin(t),3)/16,
+  (13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))/16,
+  0
+ );
+}
+
+// Heart outline points, preserving the original shape
+const heartPath=[];
+for(let i=0;i<500;i++){
+ const p=heartPoint(i/500*Math.PI*2);
+ p.multiplyScalar(.72);
+ p.y+=.92;
+ heartPath.push(p);
+}
+
+// Build a dense collection of stars along the heart outline.
+// Stars start scattered and converge onto the heart.
+const HEART_COUNT=1600;
+const heartPositions=new Float32Array(HEART_COUNT*3);
+const heartTargets=new Float32Array(HEART_COUNT*3);
+const heartSizes=[];
+const heartSeeds=[];
+
+for(let i=0;i<HEART_COUNT;i++){
+ const p=heartPath[Math.floor(Math.random()*heartPath.length)];
+ const spread=.025+Math.random()*.055;
+ heartTargets[i*3]=p.x+(Math.random()-.5)*spread;
+ heartTargets[i*3+1]=p.y+(Math.random()-.5)*spread;
+ heartTargets[i*3+2]=(Math.random()-.5)*.13;
+
+ heartPositions[i*3]=(Math.random()-.5)*5;
+ heartPositions[i*3+1]=(Math.random()-.5)*4;
+ heartPositions[i*3+2]=(Math.random()-.5)*2;
+
+ heartSeeds.push({
+  delay:Math.random()*.9,
+  phase:Math.random()*Math.PI*2,
+  speed:.8+Math.random()*2
+ });
+}
+
+const heartGeometry=new THREE.BufferGeometry();
+heartGeometry.setAttribute('position',new THREE.BufferAttribute(heartPositions,3));
+const heartStars=new THREE.Points(
+ heartGeometry,
+ makeStarMaterial(0xff62bd,.025,.95)
+);
+world.add(heartStars);
+
+// Additional glowing points along the heart for a brighter outline
+const heartGlowGeometry=new THREE.BufferGeometry();
+const heartGlowPositions=new Float32Array(HEART_COUNT*3);
+heartGlowGeometry.setAttribute('position',new THREE.BufferAttribute(heartGlowPositions,3));
+const heartGlowStars=new THREE.Points(
+ heartGlowGeometry,
+ makeStarMaterial(0xffb5e4,.012,.9)
+);
+world.add(heartGlowStars);
+
+// ---------- PORTAL / BASE ----------
+const portal=new THREE.Group();
+world.add(portal);
+
+// Star particles arranged along the original elliptical rings.
+// The ellipse dimensions match the uploaded file.
+const ringDefinitions=[
+ {rx:1.05,ry:.12,z:-.05,count:320,color:0xff168d,size:.022,opacity:.95},
+ {rx:1.26,ry:.17,z:-.08,count:380,color:0xff3aa5,size:.018,opacity:.7},
+ {rx:1.55,ry:.23,z:-.10,count:440,color:0xa91571,size:.016,opacity:.55},
+ {rx:.78,ry:.075,z:-.02,count:260,color:0xffa5df,size:.02,opacity:.9},
+ {rx:1.0,ry:.09,z:-.03,count:300,color:0xff69c2,size:.018,opacity:.8}
+];
+
+const rings=[];
+ringDefinitions.forEach((def,index)=>{
+ const positions=new Float32Array(def.count*3);
+ const targets=new Float32Array(def.count*3);
+ const seeds=[];
+
+ for(let i=0;i<def.count;i++){
+  const a=i/def.count*Math.PI*2;
+  const wobble=(Math.random()-.5)*.018;
+  targets[i*3]=Math.cos(a)*(def.rx+wobble);
+  targets[i*3+1]=Math.sin(a)*(def.ry+wobble*.35);
+  targets[i*3+2]=def.z+(Math.random()-.5)*.025;
+
+  positions[i*3]=(Math.random()-.5)*5;
+  positions[i*3+1]=(Math.random()-.5)*4;
+  positions[i*3+2]=(Math.random()-.5)*2;
+
+  seeds.push({
+   delay:Math.random()*1.1,
+   phase:Math.random()*Math.PI*2,
+   speed:.7+Math.random()*1.8
+  });
+ }
+
+ const geometry=new THREE.BufferGeometry();
+ geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));
+ const points=new THREE.Points(
+  geometry,
+  makeStarMaterial(def.color,def.size,def.opacity)
+ );
+ portal.add(points);
+ rings.push({geometry,positions,targets,seeds,points,def});
+});
+
+// ---------- APOLOGY TEXT AROUND THE BASE ----------
+// Mongolian apology phrases arranged around the original elliptical base.
+const apologyTexts=[];
+function makeApologyText(txt){
+ const c=document.createElement('canvas');
+ c.width=512;c.height=96;
+ const ctx=c.getContext('2d');
+ ctx.font='bold 42px Arial';
+ ctx.textAlign='center';
+ ctx.textBaseline='middle';
+ ctx.shadowColor='#ff168d';
+ ctx.shadowBlur=18;
+ ctx.fillStyle='#ffd1e9';
+ ctx.fillText(txt,256,48);
+ const tex=new THREE.CanvasTexture(c);
+ const sprite=new THREE.Sprite(new THREE.SpriteMaterial({
+  map:tex,transparent:true,depthWrite:false,
+  blending:THREE.AdditiveBlending,opacity:0
+ }));
+ sprite.scale.set(.92,.18,1);
+ portal.add(sprite);
+ return sprite;
+}
+for(let i=0;i<8;i++){
+ const a=i/8*Math.PI*2;
+ const label=makeApologyText('Намайг уучлаарай');
+ label.position.set(Math.cos(a)*1.72,Math.sin(a)*.31,.12);
+ label.material.rotation=0;
+ apologyTexts.push(label);
+}
+
+// Original center beam, recreated with star points
+const beamCount=260;
+const beamPositions=new Float32Array(beamCount*3);
+const beamTargets=new Float32Array(beamCount*3);
+const beamSeeds=[];
+
+for(let i=0;i<beamCount;i++){
+ const x=(i/(beamCount-1)-.5)*2.05;
+ beamTargets[i*3]=x;
+ beamTargets[i*3+1]=0;
+ beamTargets[i*3+2]=.02+(Math.random()-.5)*.012;
+
+ beamPositions[i*3]=(Math.random()-.5)*5;
+ beamPositions[i*3+1]=(Math.random()-.5)*4;
+ beamPositions[i*3+2]=(Math.random()-.5)*2;
+
+ beamSeeds.push({delay:Math.random()*.8,phase:Math.random()*6.28});
+}
+
+const beamGeometry=new THREE.BufferGeometry();
+beamGeometry.setAttribute('position',new THREE.BufferAttribute(beamPositions,3));
+const beamStars=new THREE.Points(
+ beamGeometry,
+ makeStarMaterial(0xffb5e4,.022,.95)
+);
+portal.add(beamStars);
+
+// ---------- CENTER HEART ----------
+function spriteText(txt,size=64,color='#ff8bd0'){
+ const c=document.createElement('canvas');
+ c.width=1024;c.height=160;
+ const ctx=c.getContext('2d');
+ ctx.font=`bold ${size}px Arial`;
+ ctx.textAlign='center';
+ ctx.textBaseline='middle';
+ ctx.shadowColor='#ff168d';
+ ctx.shadowBlur=24;
+ ctx.fillStyle=color;
+ ctx.fillText(txt,512,80);
+
+ const tex=new THREE.CanvasTexture(c);
+ const s=new THREE.Sprite(new THREE.SpriteMaterial({
+  map:tex,transparent:true,depthWrite:false,
+  blending:THREE.AdditiveBlending
+ }));
+ s.scale.set(2.4,.38,1);
+ world.add(s);
+ return s;
+}
+const floating=spriteText('Би чамдаа хайртай',54,'#ffd1e9');
+floating.visible=false;
+
+const tinyHeart=spriteText('♥',70,'#ff8bd0');
+tinyHeart.scale.set(.28,.2,1);
+tinyHeart.position.set(0,.2,.3);
+tinyHeart.visible=false;
+
+// ---------- FLOATING PARTICLES ----------
+const count=800;
+const arr=new Float32Array(count*3);
+const vel=[];
+for(let i=0;i<count;i++){
+ arr[3*i]=(Math.random()-.5)*.06;
+ arr[3*i+1]=(Math.random()-.5)*.06;
+ arr[3*i+2]=.1;
+ vel.push({
+  a:Math.random()*Math.PI*2,
+  r:.5+Math.random()*2.5,
+  s:.15+Math.random()*.55
+ });
+}
+const pg=new THREE.BufferGeometry();
+pg.setAttribute('position',new THREE.BufferAttribute(arr,3));
+const particleMat=makeStarMaterial(0xff6cbd,.018,.75);
+const particles=new THREE.Points(pg,particleMat);
+world.add(particles);
+
+// ---------- RAYS ----------
+const raysGroup=new THREE.Group();
+scene.add(raysGroup);
+const rayLines=[];
+for(let i=0;i<180;i++){
+ const a=Math.random()*Math.PI*2;
+ const r=.05+Math.random()*.16;
+ const len=1.3+Math.random()*4.7;
+ const pts=[
+  new THREE.Vector3(Math.cos(a)*r,Math.sin(a)*r,0),
+  new THREE.Vector3(Math.cos(a)*(r+len),Math.sin(a)*(r+len),0)
+ ];
+ const m=new THREE.LineBasicMaterial({
+  color:i%4===0?0xffa0d9:0x8f8494,
+  transparent:true,
+  opacity:.35+Math.random()*.45
+ });
+ const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),m);
+ raysGroup.add(l);
+ rayLines.push(l);
+}
+raysGroup.visible=false;
+
+// ---------- START / INTERACTION ----------
+let begun=false,beginAt=0;
+let drag=false,lastX=0,lastY=0,rotY=0,rotX=0;
+
+startScreen.addEventListener('click', () => {
+    if (begun) return;
+
+    begun = true;
+    beginAt = performance.now();
+
+    // Дууг эхлүүлнэ
+    bgMusic.currentTime = 0;
+    bgMusic.play().catch(error => {
+        console.error('Дуу тоглуулахад алдаа гарлаа:', error);
+    });
+
+    // 30 секундын дараа дууг зогсооно
+    setTimeout(() => {
+        bgMusic.pause();
+        bgMusic.currentTime = 0;
+    }, 60000);
+
+    // Эхлэх дэлгэцийг арилгана
+    startScreen.style.opacity = '0';
+    setTimeout(() => {
+        startScreen.style.display = 'none';
+    }, 850);
+
+    title.style.opacity = '1';
+});
+
+renderer.domElement.addEventListener('pointerdown',e=>{
+ drag=true;
+ lastX=e.clientX;lastY=e.clientY;
+ renderer.domElement.setPointerCapture(e.pointerId);
+});
+renderer.domElement.addEventListener('pointermove',e=>{
+ if(!drag)return;
+ rotY+=(e.clientX-lastX)*.006;
+ rotX+=(e.clientY-lastY)*.006;
+ lastX=e.clientX;lastY=e.clientY;
+});
+renderer.domElement.addEventListener('pointerup',()=>drag=false);
+renderer.domElement.addEventListener('pointercancel',()=>drag=false);
+
+function smooth(x){
+ x=Math.max(0,Math.min(1,x));
+ return x*x*(3-2*x);
+}
+
+// Move stars from scattered positions into their final shape
+function formStars(positions,targets,seeds,t,formDuration){
+ const count=seeds.length;
+ for(let i=0;i<count;i++){
+  const k=i*3;
+  const seed=seeds[i];
+  const progress=smooth((t-seed.delay)/formDuration);
+  const twinkle=Math.sin(t*seed.speed*3+seed.phase)*.008;
+  positions[k]=THREE.MathUtils.lerp(
+   positions[k],targets[k]+twinkle,progress*.12
+  );
+  positions[k+1]=THREE.MathUtils.lerp(
+   positions[k+1],targets[k+1]+twinkle,progress*.12
+  );
+  positions[k+2]=THREE.MathUtils.lerp(
+   positions[k+2],targets[k+2],progress*.12
+  );
+ }
+}
+
+// ---------- ANIMATION ----------
+function animate(now){
+ requestAnimationFrame(animate);
+ const t=begun?(now-beginAt)/1000:0;
+ world.visible=begun;
+
+ if(begun){
+  // 1.4-3.4 seconds: original radial burst
+  const burst=t>=1.4&&t<3.4;
+  raysGroup.visible=burst;
+  if(burst){
+   const k=t<2.2?smooth((t-1.4)/.8):1-smooth((t-2.2)/1.2);
+   raysGroup.scale.setScalar(.25+k*.95);
+   raysGroup.rotation.z=t*.02;
+   raysGroup.children.forEach((l,i)=>{
+    l.material.opacity=(.25+Math.sin(i*2.1)*.12)*k;
+   });
+  }
+
+  // 2.8-5.5 seconds: star rings form first
+  const ringReveal=smooth((t-2.8)/2.0);
+  portal.visible=t>2.8;
+  rings.forEach(ring=>{
+   const pos=ring.positions;
+   for(let i=0;i<ring.seeds.length;i++){
+    const k=i*3;
+    const seed=ring.seeds[i];
+    const p=smooth((t-2.8-seed.delay*.7)/1.5);
+    const wobble=Math.sin(t*2.5+seed.phase)*.006;
+    pos[k]=THREE.MathUtils.lerp(pos[k],ring.targets[k]+wobble,p*.13);
+    pos[k+1]=THREE.MathUtils.lerp(pos[k+1],ring.targets[k+1]+wobble,p*.13);
+    pos[k+2]=THREE.MathUtils.lerp(pos[k+2],ring.targets[k+2],p*.13);
+   }
+   ring.geometry.attributes.position.needsUpdate=true;
+   ring.points.material.opacity=ring.def.opacity*ringReveal;
+  });
+  apologyTexts.forEach(label=>{
+   label.material.opacity=.95*ringReveal;
+  });
+
+  // Center beam forms with the portal
+  for(let i=0;i<beamSeeds.length;i++){
+   const k=i*3;
+   const p=smooth((t-3.0-beamSeeds[i].delay)/1.1);
+   beamPositions[k]=THREE.MathUtils.lerp(beamPositions[k],beamTargets[k],p*.15);
+   beamPositions[k+1]=THREE.MathUtils.lerp(beamPositions[k+1],beamTargets[k+1],p*.15);
+   beamPositions[k+2]=THREE.MathUtils.lerp(beamPositions[k+2],beamTargets[k+2],p*.15);
+  }
+  beamGeometry.attributes.position.needsUpdate=true;
+  beamStars.material.opacity=.95*ringReveal;
+
+  const pulse=1+Math.sin(t*2.4)*.035;
+  portal.scale.set(pulse,pulse,1);
+  portal.rotation.z=Math.sin(t*.7)*.025;
+
+  // 4.3-6.4 seconds: original heart rises and forms from stars
+  const rise=smooth((t-4.3)/2.1);
+  heartStars.visible=t>3.1;
+  heartGlowStars.visible=t>3.1;
+
+  for(let i=0;i<HEART_COUNT;i++){
+   const k=i*3;
+   const seed=heartSeeds[i];
+   const progress=smooth((t-3.1-seed.delay)/1.7);
+   const twinkle=Math.sin(t*seed.speed*3+seed.phase)*.008;
+   const targetY=heartTargets[k+1];
+   const raisedY=targetY*rise-.48*(1-rise);
+
+   heartPositions[k]=THREE.MathUtils.lerp(
+    heartPositions[k],heartTargets[k]+twinkle,progress*.13
+   );
+   heartPositions[k+1]=THREE.MathUtils.lerp(
+    heartPositions[k+1],raisedY+twinkle,progress*.13
+   );
+   heartPositions[k+2]=THREE.MathUtils.lerp(
+    heartPositions[k+2],heartTargets[k+2],progress*.13
+   );
+
+   heartGlowPositions[k]=heartPositions[k];
+   heartGlowPositions[k+1]=heartPositions[k+1];
+   heartGlowPositions[k+2]=heartPositions[k+2];
+  }
+
+  heartGeometry.attributes.position.needsUpdate=true;
+  heartGlowGeometry.attributes.position.needsUpdate=true;
+  heartStars.material.opacity=smooth((t-3.1)/1.2);
+  heartGlowStars.material.opacity=.65*smooth((t-3.1)/1.4);
+
+  // Center heart and floating text
+  tinyHeart.visible=t>5.1;
+  tinyHeart.position.y=.1+Math.sin(t*2.2)*.07;
+  tinyHeart.material.opacity=t<6?rise:1;
+
+  floating.visible=t>8.5;
+  floating.position.set(
+   Math.sin(t*.45)*.1,
+   1.95+Math.sin(t*1.2)*.08,
+   .2
+  );
+  floating.material.opacity=t>8.5?Math.min(1,(t-8.5)/1.2):0;
+
+  subtitle.textContent=t>9?'Миний зүрх үргэлж чам руу тэмүүлнэ ♥':'';
+  subtitle.style.opacity=t>9?Math.min(1,(t-9)/1.2):0;
+
+  // Ambient floating stars
+  const pos=pg.attributes.position.array;
+  for(let i=0;i<count;i++){
+   const v=vel[i];
+   const a=v.a+t*v.s*.3;
+   const r=v.r*(.75+.25*Math.sin(t*1.4+i));
+   pos[3*i]=Math.cos(a)*r;
+   pos[3*i+1]=Math.sin(a)*r*.35;
+   pos[3*i+2]=.12+Math.sin(a*3+t)*.12;
+  }
+  pg.attributes.position.needsUpdate=true;
+  particles.material.opacity=.42+Math.sin(t*2)*.15;
+
+  // Subtle rotation and mouse control
+  world.rotation.y=rotY+Math.sin(t*.32)*.09;
+  world.rotation.x=rotX+Math.sin(t*.25)*.035;
+  world.rotation.z=Math.sin(t*.45)*.025;
+ }
+
+ renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+function resize(){
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+}
+addEventListener('resize',resize);
+})();
+</script>
+</body>
+</html>
